@@ -7,6 +7,9 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.Collector;
 
+import guru.bonacci.flink.domain.Transfer;
+import guru.bonacci.flink.domain.TransferStringWrapper;
+
 class LastRequestCache extends KeyedProcessFunction<String, Transfer, TransferStringWrapper> {
 
 		private static final long serialVersionUID = 1L;

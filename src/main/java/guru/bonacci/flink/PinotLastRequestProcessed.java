@@ -18,6 +18,8 @@ import org.apache.pinot.client.ResultSetGroup;
 import org.jooq.SQLDialect;
 import org.jooq.impl.DSL;
 
+import guru.bonacci.flink.domain.TransferStringWrapper;
+import guru.bonacci.flink.domain.TransferValidityWrapper;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j

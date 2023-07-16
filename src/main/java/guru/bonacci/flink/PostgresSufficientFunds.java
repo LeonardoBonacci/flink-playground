@@ -21,7 +21,11 @@ import com.github.jasync.sql.db.Connection;
 import com.github.jasync.sql.db.QueryResult;
 import com.github.jasync.sql.db.postgresql.PostgreSQLConnectionBuilder;
 
-class PostgresSufficientFunds extends RichAsyncFunction<Transfer, TransferValidityWrapper> {
+import guru.bonacci.flink.domain.Transfer;
+import guru.bonacci.flink.domain.TransferStringWrapper;
+import guru.bonacci.flink.domain.TransferValidityWrapper;
+
+class PostgresSufficientFunds extends RichAsyncFunction<Transfer, TransferStringWrapper> {
 
 		private String CONNECTION_URL = "jdbc:postgresql://127.0.0.1:5432/postgres?user=baeldung&password=baeldung";
 		private transient Connection conn;
@@ -45,7 +49,7 @@ class PostgresSufficientFunds extends RichAsyncFunction<Transfer, TransferValidi
 			) AS tmp;	
      */
     @Override
-    public void asyncInvoke(Transfer tf, final ResultFuture<TransferValidityWrapper> resultFuture) throws Exception {
+    public void asyncInvoke(Transfer tf, final ResultFuture<TransferStringWrapper> resultFuture) throws Exception {
     	String query = DSL.using(SQLDialect.POSTGRES)
       		.select(sum(field("amount").coerce(Double.class)).as("balance"))
   				.from(
@@ -75,7 +79,7 @@ class PostgresSufficientFunds extends RichAsyncFunction<Transfer, TransferValidi
       }).thenAccept( (QueryResult queryResult) -> {
         resultFuture.complete(
         		Collections.singleton(
-        				new TransferValidityWrapper(tf, Double.valueOf(queryResult.getRows().get(0).get(0).toString()) > 0.0)));
+        				new TransferStringWrapper(tf, queryResult.getRows().get(0).get(0).toString())));
       });
     }
 }

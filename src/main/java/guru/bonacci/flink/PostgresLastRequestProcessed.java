@@ -18,6 +18,9 @@ import com.github.jasync.sql.db.Connection;
 import com.github.jasync.sql.db.QueryResult;
 import com.github.jasync.sql.db.postgresql.PostgreSQLConnectionBuilder;
 
+import guru.bonacci.flink.domain.TransferStringWrapper;
+import guru.bonacci.flink.domain.TransferValidityWrapper;
+
 class PostgresLastRequestProcessed extends RichAsyncFunction<TransferStringWrapper, TransferValidityWrapper> {
 
 		private String CONNECTION_URL = "jdbc:postgresql://127.0.0.1:5432/postgres?user=baeldung&password=baeldung";

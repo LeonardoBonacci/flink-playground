@@ -8,6 +8,9 @@ import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Collector;
 
+import guru.bonacci.flink.domain.Transfer;
+import guru.bonacci.flink.domain.TransferValidityWrapper;
+
 class RequestThrottler extends RichFlatMapFunction<Transfer, TransferValidityWrapper> {
 
   private transient ValueState<String> recentRequests;
