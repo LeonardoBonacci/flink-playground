@@ -10,6 +10,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Supplier;
 
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.functions.async.RichAsyncFunction;
@@ -22,10 +23,10 @@ import com.github.jasync.sql.db.QueryResult;
 import com.github.jasync.sql.db.postgresql.PostgreSQLConnectionBuilder;
 
 import guru.bonacci.flink.domain.Transfer;
-import guru.bonacci.flink.domain.TransferStringWrapper;
-import guru.bonacci.flink.domain.TransferValidityWrapper;
 
-class PostgresSufficientFunds extends RichAsyncFunction<Transfer, TransferStringWrapper> {
+class PostgresSufficientFunds extends RichAsyncFunction<Transfer, Tuple2<Transfer, String>> {
+
+		private static final long serialVersionUID = 1L;
 
 		private String CONNECTION_URL = "jdbc:postgresql://127.0.0.1:5432/postgres?user=baeldung&password=baeldung";
 		private transient Connection conn;
@@ -49,7 +50,7 @@ class PostgresSufficientFunds extends RichAsyncFunction<Transfer, TransferString
 			) AS tmp;	
      */
     @Override
-    public void asyncInvoke(Transfer tf, final ResultFuture<TransferStringWrapper> resultFuture) throws Exception {
+    public void asyncInvoke(Transfer tf, final ResultFuture<Tuple2<Transfer, String>> resultFuture) throws Exception {
     	String query = DSL.using(SQLDialect.POSTGRES)
       		.select(sum(field("amount").coerce(Double.class)).as("balance"))
   				.from(
@@ -79,7 +80,7 @@ class PostgresSufficientFunds extends RichAsyncFunction<Transfer, TransferString
       }).thenAccept( (QueryResult queryResult) -> {
         resultFuture.complete(
         		Collections.singleton(
-        				new TransferStringWrapper(tf, queryResult.getRows().get(0).get(0).toString())));
+        				Tuple2.of(tf, queryResult.getRows().get(0).get(0).toString())));
       });
     }
 }

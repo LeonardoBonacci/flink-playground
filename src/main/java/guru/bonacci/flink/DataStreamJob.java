@@ -26,6 +26,7 @@ import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.connector.jdbc.JdbcConnectionOptions;
 import org.apache.flink.connector.jdbc.JdbcExecutionOptions;
 import org.apache.flink.connector.jdbc.JdbcSink;
@@ -40,8 +41,6 @@ import org.apache.flink.streaming.util.retryable.RetryPredicates;
 
 import guru.bonacci.flink.domain.Transfer;
 import guru.bonacci.flink.domain.TransferRule;
-import guru.bonacci.flink.domain.TransferStringWrapper;
-import guru.bonacci.flink.domain.TransferValidityWrapper;
 import guru.bonacci.flink.source.RuleGenerator;
 import guru.bonacci.flink.source.TransferGenerator;
 
@@ -53,14 +52,11 @@ public class DataStreamJob {
 		env.setParallelism(10);
 		
 		DataStream<TransferRule> ruleStream = env.addSource(new RuleGenerator())
-				.map(new MapFunction<TransferRule, TransferRule>() {
-
-					@Override
-					public TransferRule map(TransferRule value) throws Exception {
-						System.out.println(value);
-						return value;
+				.map(rule -> {
+						System.out.println(rule);
+						return rule;
 					}
-				});
+				);
 				
 		DataStream<Transfer> transferRequestStream = env.addSource(new TransferGenerator())
 				.assignTimestampsAndWatermarks(new AscendingTimestampExtractor<Transfer>() {
@@ -69,35 +65,17 @@ public class DataStreamJob {
 					return tf.getTimestamp();
 				}
 			})
-			.filter(new FilterFunction<Transfer>() {
-				
-				@Override
-				public boolean filter(Transfer tf) throws Exception {
-					return !tf.getFrom().equals(tf.getTo());
-				}
-			});
+			.filter(tf -> !tf.getFrom().equals(tf.getTo()));
 
 		DataStream<Transfer> throttledStream = transferRequestStream
 			.keyBy(Transfer::getFrom)	
 			.flatMap(new RequestThrottler()).name("throttle")
-			.filter(new FilterFunction<TransferValidityWrapper>() {
-				
-				@Override
-				public boolean filter(TransferValidityWrapper wrapper) throws Exception {
-					return wrapper.isValid();
-				}
-			})
-			.map(new MapFunction<TransferValidityWrapper, Transfer>() {
-
-				@Override
-				public Transfer map(TransferValidityWrapper wrapper) throws Exception {
-					return wrapper.getTransfer();
-				}
-			});
+			.filter(tuple -> tuple.f1)
+			.map(tuple -> tuple.f0);
 
 		@SuppressWarnings("unchecked")
-		AsyncRetryStrategy<TransferStringWrapper> asyncRetryStrategy =
-			new AsyncRetryStrategies.FixedDelayRetryStrategyBuilder<TransferStringWrapper>(3, 100L) // maxAttempts=3, fixedDelay=100ms
+		AsyncRetryStrategy<Tuple2<Transfer, String>> asyncRetryStrategy =
+			new AsyncRetryStrategies.FixedDelayRetryStrategyBuilder<Tuple2<Transfer, String>>(3, 100L) // maxAttempts=3, fixedDelay=100ms
 				.ifResult(RetryPredicates.EMPTY_RESULT_PREDICATE)
 				.ifException(RetryPredicates.HAS_EXCEPTION_PREDICATE)
 				.build();
@@ -117,26 +95,14 @@ public class DataStreamJob {
 				.connect(ruleBroadcastStream)
 				.process(new DynamicBalanceRuler());
 
-		DataStream<TransferStringWrapper> lastRequestStream = balancedStream
+		DataStream<Tuple2<Transfer, String>> lastRequestStream = balancedStream
 				.keyBy(Transfer::getFrom)	
 				.process(new LastRequestCache()).name("request-cache");
 
 			DataStream<Transfer> dbInSyncStream = AsyncDataStream.orderedWait(lastRequestStream, new PostgresLastRequestProcessed(), 1000, TimeUnit.MILLISECONDS, 1000)
 				.name("db-in-sync")
-				.filter(new FilterFunction<TransferValidityWrapper>() {
-					
-					@Override
-					public boolean filter(TransferValidityWrapper wrapper) throws Exception {
-						return wrapper.isValid();
-					}
-				})
-				.map(new MapFunction<TransferValidityWrapper, Transfer>() {
-		
-					@Override
-					public Transfer map(TransferValidityWrapper wrapper) throws Exception {
-						return wrapper.getTransfer();
-					}
-				});
+				.filter(tuple -> tuple.f1)
+				.map(tuple -> tuple.f0);
 		
 			dbInSyncStream.print();
 			dbInSyncStream.addSink(
