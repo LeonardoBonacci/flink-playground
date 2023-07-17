@@ -54,8 +54,8 @@ public class DataStreamJob {
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setParallelism(10);
 		
-		final OutputTag<Transfer> outputTagValid = new OutputTag<Transfer>("valid"){};
-		final OutputTag<Tuple2<Transfer, TransferErrors>> outputTagInvalid = new OutputTag<Tuple2<Transfer, TransferErrors>>("invalid"){};
+		final OutputTag<Tuple2<Transfer, TransferErrors>> outputTagInvalidTransfer = 
+				new OutputTag<Tuple2<Transfer, TransferErrors>>("invalid"){};
 
 		env.fromSource(Sources.createInputMessageConsumer("foo", "my-group"), WatermarkStrategy.noWatermarks(), "Kafka Source")
 			.print();
@@ -73,14 +73,12 @@ public class DataStreamJob {
 
 		DataStream<Tuple2<Transfer, Boolean>> throttlingStream = transferRequestStream
 			.keyBy(Transfer::getFrom)	
-			.flatMap(new RequestThrottler()).name("throttle");
+			.map(new RequestThrottler()).name("throttle");
 		
-		SingleOutputStreamOperator<Transfer> mainThrottlingStream = throttlingStream
-			  .process(new Splitter(outputTagValid, outputTagInvalid, TransferErrors.TOO_MANY_REQUESTS));
+		SingleOutputStreamOperator<Transfer> throttledStream = throttlingStream
+			  .process(new Splitter(outputTagInvalidTransfer, TransferErrors.TOO_MANY_REQUESTS));
 
-		DataStream<Transfer> throttledStream = mainThrottlingStream.getSideOutput(outputTagValid);
-		
-		mainThrottlingStream.getSideOutput(outputTagInvalid) // error handling
+		throttledStream.getSideOutput(outputTagInvalidTransfer) // error handling
 		 .map(tuple -> tuple.f1.toString() + ">" + tuple.f0.toString())
 		 .sinkTo(Sinks.kafkaStringProducer("houston"));
 
@@ -99,29 +97,30 @@ public class DataStreamJob {
 		 
 		 BroadcastStream<TransferRule> ruleBroadcastStream = ruleStream.broadcast(ruleStateDescriptor);
 		 
-		 SingleOutputStreamOperator<Transfer> mainBalancedStream = 
+		 SingleOutputStreamOperator<Transfer> balancedStream = 
 				AsyncDataStream.orderedWaitWithRetry(throttledStream, new PostgresSufficientFunds(), 1000, TimeUnit.MILLISECONDS, 100, asyncRetryStrategy)
 				.name("sufficient-funds")
 				.connect(ruleBroadcastStream)
-				.process(new DynamicBalanceSplitter(outputTagValid, outputTagInvalid));
+				.process(new DynamicBalanceSplitter(outputTagInvalidTransfer));
 
-		 mainBalancedStream.getSideOutput(outputTagInvalid) // error handling
+		 balancedStream.getSideOutput(outputTagInvalidTransfer) // error handling
 			 .map(tuple -> tuple.f1.toString() + ">" + tuple.f0.toString())
 			 .sinkTo(Sinks.kafkaStringProducer("houston"));
 
-		 DataStream<Tuple2<Transfer, String>> lastRequestStream = mainBalancedStream.getSideOutput(outputTagValid)
-				.keyBy(Transfer::getFrom)	
-				.process(new LastRequestCache()).name("request-cache");
+		 DataStream<Tuple2<Transfer, String>> lastRequestStream = 
+				 balancedStream
+					.keyBy(Transfer::getFrom)	
+					.process(new LastRequestCache()).name("request-cache");
 
-		 SingleOutputStreamOperator<Transfer> mainDbInSyncStream = AsyncDataStream.orderedWait(lastRequestStream, new PostgresLastRequestProcessed(), 1000, TimeUnit.MILLISECONDS, 1000)
+		 SingleOutputStreamOperator<Transfer> dbInSyncStream = 
+				 AsyncDataStream.orderedWait(lastRequestStream, new PostgresLastRequestProcessed(), 1000, TimeUnit.MILLISECONDS, 1000)
 					.name("db-in-sync")
-				  .process(new Splitter(outputTagValid, outputTagInvalid, TransferErrors.TRANSFER_IN_PROGRESS));
+				  .process(new Splitter(outputTagInvalidTransfer, TransferErrors.TRANSFER_IN_PROGRESS));
 
-		 mainDbInSyncStream.getSideOutput(outputTagInvalid) // error handling
+		 dbInSyncStream.getSideOutput(outputTagInvalidTransfer) // error handling
 			 .map(tuple -> tuple.f1.toString() + ">" + tuple.f0.toString())
 			 .sinkTo(Sinks.kafkaStringProducer("houston"));
 
-		 DataStream<Transfer> dbInSyncStream = mainDbInSyncStream.getSideOutput(outputTagValid);
 		 dbInSyncStream.map(Transfer::toString).sinkTo(Sinks.kafkaStringProducer("foo"));
 		 dbInSyncStream.addSink(
         JdbcSink.sink(

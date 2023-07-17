@@ -9,12 +9,14 @@ import guru.bonacci.flink.domain.Transfer;
 import guru.bonacci.flink.domain.TransferErrors;
 import lombok.RequiredArgsConstructor;
 
+/**
+ * Branches off invalid transfers
+ */
 @RequiredArgsConstructor
 class Splitter extends ProcessFunction<Tuple2<Transfer, Boolean>, Transfer> {
 
 	private static final long serialVersionUID = 1L;
 
-	private final OutputTag<Transfer> outputTagValid;
 	private final OutputTag<Tuple2<Transfer, TransferErrors>> outputTagInvalid;
 	private final TransferErrors errorMessage;
 	
@@ -25,7 +27,7 @@ class Splitter extends ProcessFunction<Tuple2<Transfer, Boolean>, Transfer> {
       Collector<Transfer> out) throws Exception {
 
     if (tuple.f1) {
-      ctx.output(outputTagValid, tuple.f0);
+      out.collect(tuple.f0);
     } else {
       ctx.output(outputTagInvalid, Tuple2.of(tuple.f0, errorMessage));
     }

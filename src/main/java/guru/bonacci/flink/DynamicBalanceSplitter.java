@@ -20,7 +20,6 @@ public class DynamicBalanceSplitter extends BroadcastProcessFunction<Tuple2<Tran
 
   private static final long serialVersionUID = 1L;
   
-	private final OutputTag<Transfer> outputTagValid;
 	private final OutputTag<Tuple2<Transfer, TransferErrors>> outputTagInvalid;
 
 	private final MapStateDescriptor<String, TransferRule> ruleStateDescriptor = 
@@ -40,7 +39,7 @@ public class DynamicBalanceSplitter extends BroadcastProcessFunction<Tuple2<Tran
 		TransferRule poolTypeRule = rulesState.get(tuple.f0.getPoolType());
 
 		if (Double.valueOf(tuple.f1) > poolTypeRule.getMinBalance()) {
-      ctx.output(outputTagValid, tuple.f0);
+      out.collect(tuple.f0);
     } else {
       ctx.output(outputTagInvalid, Tuple2.of(tuple.f0, TransferErrors.INSUFFICIENT_BALANCE));
     }
