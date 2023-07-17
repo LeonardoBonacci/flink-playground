@@ -10,6 +10,8 @@ import guru.bonacci.flink.domain.Transfer;
 
 public class TransferGenerator extends RichSourceFunction<Transfer> {
 
+	private static final long serialVersionUID = 1L;
+
 	private final static List<String> USERS = 
 			List.of("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z");
 
@@ -33,7 +35,7 @@ public class TransferGenerator extends RichSourceFunction<Transfer> {
 								);
 
 			sourceContext.collect(tf);
-			Thread.sleep(10);
+			Thread.sleep(100);
 		}
 	}
 

@@ -33,7 +33,7 @@ class RequestThrottler extends RichFlatMapFunction<Transfer, Tuple2<Transfer, Bo
   @Override
   public void open(Configuration config) {
   	StateTtlConfig ttlConfig = StateTtlConfig
-  	    .newBuilder(Time.seconds(1)) 
+  	    .newBuilder(Time.seconds(20)) 
   	    .setUpdateType(StateTtlConfig.UpdateType.OnCreateAndWrite)
   	    .setStateVisibility(StateTtlConfig.StateVisibility.NeverReturnExpired)
   	    .build();
