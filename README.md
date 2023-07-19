@@ -1,6 +1,10 @@
 # flink-prep
 
 ```
+cat transfers_stream.txt | ./bin/kafka-console-producer --broker-list localhost:9092 --topic transfers_4 
+```
+
+```
 select count(*) from transfers;
 select * from transfers order by timestamp desc;
 

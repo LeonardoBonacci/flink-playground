@@ -16,7 +16,7 @@ import guru.bonacci.flink.domain.TransferRule;
 import lombok.RequiredArgsConstructor;
 
 @RequiredArgsConstructor
-public class DynamicBalanceSplitter extends BroadcastProcessFunction<Tuple2<Transfer, String>, TransferRule, Transfer> {
+public class DynamicBalanceSplitter extends BroadcastProcessFunction<Tuple2<Transfer, Double>, TransferRule, Transfer> {
 
   private static final long serialVersionUID = 1L;
   
@@ -34,11 +34,11 @@ public class DynamicBalanceSplitter extends BroadcastProcessFunction<Tuple2<Tran
 	}
 
 	@Override
-	public void processElement(Tuple2<Transfer, String> tuple, ReadOnlyContext ctx, Collector<Transfer> out) throws Exception {
+	public void processElement(Tuple2<Transfer, Double> tuple, ReadOnlyContext ctx, Collector<Transfer> out) throws Exception {
 		ReadOnlyBroadcastState<String, TransferRule> rulesState = ctx.getBroadcastState(ruleStateDescriptor);
 		TransferRule poolTypeRule = rulesState.get(tuple.f0.getPoolType());
 
-		if (Double.valueOf(tuple.f1) > poolTypeRule.getMinBalance()) {
+		if (tuple.f1 > poolTypeRule.getMinBalance()) {
       out.collect(tuple.f0);
     } else {
       ctx.output(outputTagInvalid, Tuple2.of(tuple.f0, TransferErrors.INSUFFICIENT_BALANCE));

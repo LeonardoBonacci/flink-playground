@@ -57,12 +57,12 @@ class PostgresSufficientFunds extends RichAsyncFunction<Transfer, Tuple2<Transfe
   						select(
   								sum(field("amount").coerce(Double.class)).mul(val(-1)).as("amount"))
   						.from("transfers")
-  						.where(field("_from").eq(tf.getFrom()))
+  						.where(field("_from").eq(tf.getFromId()))
   						.union(
   								select(
   										sum(field("amount").coerce(Double.class).as("amount")))
   								.from("transfers")
-  								.where(field("_to").eq(tf.getFrom()))
+  								.where(field("_to").eq(tf.getFromId()))
 							)
   				).getSQL(ParamType.INLINED);
     	

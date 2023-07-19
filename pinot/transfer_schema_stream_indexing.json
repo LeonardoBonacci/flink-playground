@@ -1,0 +1,37 @@
+{
+    "schemaName": "transfers_4",
+    "dimensionFieldSpecs": [
+      {
+        "name": "id",
+        "dataType": "STRING"
+      },
+      {
+        "name": "fromId",
+        "dataType": "STRING"
+      },
+      {
+        "name": "toId",
+        "dataType": "STRING"
+      },
+      {
+        "name": "poolId",
+        "dataType": "STRING"
+      },
+      {
+        "name": "poolType",
+        "dataType": "STRING"
+      }
+    ],
+    "metricFieldSpecs": [
+      {
+        "name": "amount",
+        "dataType": "DOUBLE"
+      }
+    ],
+    "dateTimeFieldSpecs": [{
+      "name": "timestamp",
+      "dataType": "LONG",
+      "format" : "1:MILLISECONDS:EPOCH",
+      "granularity": "1:MILLISECONDS"
+    }]
+  }

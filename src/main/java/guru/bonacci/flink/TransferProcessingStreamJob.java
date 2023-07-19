@@ -9,9 +9,6 @@ import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.connector.jdbc.JdbcConnectionOptions;
-import org.apache.flink.connector.jdbc.JdbcExecutionOptions;
-import org.apache.flink.connector.jdbc.JdbcSink;
 import org.apache.flink.streaming.api.datastream.AsyncDataStream;
 import org.apache.flink.streaming.api.datastream.BroadcastStream;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -34,7 +31,7 @@ import guru.bonacci.flink.source.TransferGenerator;
 
 public class TransferProcessingStreamJob {
 
-	final static String TOPIC_TRANSFERS = "transfers";
+	final static String TOPIC_TRANSFERS = "transfers_4";
 	final static String TOPIC_ERRORS = "houston";
 	
 	public static void main(String[] args) throws Exception {
@@ -58,10 +55,10 @@ public class TransferProcessingStreamJob {
 				
 		DataStream<Transfer> transferRequestStream = env.addSource(new TransferGenerator())
 			.assignTimestampsAndWatermarks(WatermarkStrategy.forMonotonousTimestamps())
-			.filter(tf -> !tf.getFrom().equals(tf.getTo()));
+			.filter(tf -> !tf.getFromId().equals(tf.getToId()));
 
 		DataStream<Tuple2<Transfer, Boolean>> throttlingStream = transferRequestStream
-			.keyBy(Transfer::getFrom)	
+			.keyBy(Transfer::getFromId)	
 			.map(new RequestThrottler()).name("throttle");
 		
 		SingleOutputStreamOperator<Transfer> throttledStream = throttlingStream
@@ -72,8 +69,8 @@ public class TransferProcessingStreamJob {
 		 .sinkTo(Sinks.kafkaStringProducer(TOPIC_ERRORS));
 
 		@SuppressWarnings("unchecked")
-		AsyncRetryStrategy<Tuple2<Transfer, String>> asyncRetryStrategy =
-			new AsyncRetryStrategies.FixedDelayRetryStrategyBuilder<Tuple2<Transfer, String>>(3, 100L) // maxAttempts=3, fixedDelay=100ms
+		AsyncRetryStrategy<Tuple2<Transfer, Double>> asyncRetryStrategy =
+			new AsyncRetryStrategies.FixedDelayRetryStrategyBuilder<Tuple2<Transfer, Double>>(3, 100L) // maxAttempts=3, fixedDelay=100ms
 				.ifResult(RetryPredicates.EMPTY_RESULT_PREDICATE)
 				.ifException(RetryPredicates.HAS_EXCEPTION_PREDICATE)
 				.build();
@@ -87,7 +84,7 @@ public class TransferProcessingStreamJob {
 		 BroadcastStream<TransferRule> ruleBroadcastStream = ruleStream.broadcast(ruleStateDescriptor);
 		 
 		 SingleOutputStreamOperator<Transfer> balancedStream = 
-				AsyncDataStream.orderedWaitWithRetry(throttledStream, new PostgresSufficientFunds(), 1000, TimeUnit.MILLISECONDS, 100, asyncRetryStrategy)
+				AsyncDataStream.orderedWaitWithRetry(throttledStream, new PinotSufficientFunds(), 1000, TimeUnit.MILLISECONDS, 100, asyncRetryStrategy)
 				.name("sufficient-funds")
 				.connect(ruleBroadcastStream)
 				.process(new DynamicBalanceSplitter(outputTagInvalidTransfer));
@@ -98,11 +95,11 @@ public class TransferProcessingStreamJob {
 
 		 DataStream<Tuple2<Transfer, String>> lastRequestStream = 
 				 balancedStream
-					.keyBy(Transfer::getFrom)	
+					.keyBy(Transfer::getFromId)	
 					.process(new LastRequestCache()).name("request-cache");
 
 		 SingleOutputStreamOperator<Transfer> dbInSyncStream = 
-				 AsyncDataStream.orderedWait(lastRequestStream, new PostgresLastRequestProcessed(), 1000, TimeUnit.MILLISECONDS, 1000)
+				 AsyncDataStream.orderedWait(lastRequestStream, new PinotLastRequestProcessed(), 1000, TimeUnit.MILLISECONDS, 1000)
 					.name("db-in-sync")
 				  .process(new Splitter(outputTagInvalidTransfer, TransferErrors.TRANSFER_IN_PROGRESS));
 
@@ -110,37 +107,37 @@ public class TransferProcessingStreamJob {
 			 .map(tuple -> tuple.f1.toString() + ">" + tuple.f0.toString())
 			 .sinkTo(Sinks.kafkaStringProducer(TOPIC_ERRORS));
 
-		 dbInSyncStream.map(new MapFunction<Transfer, Tuple2<Transfer, String>>() {
+		 balancedStream.map(new MapFunction<Transfer, Tuple2<Transfer, String>>() {
 
 			@Override
 			public Tuple2<Transfer, String> map(Transfer tr) throws Exception {
-				return Tuple2.<Transfer, String>of(tr, tr.getFrom());			}
+				return Tuple2.<Transfer, String>of(tr, tr.getFromId());			}
 		 	})
 		 	.sinkTo(Sinks.kafkaTransferProducer(TOPIC_TRANSFERS));
 		 
-		 dbInSyncStream.addSink(
-        JdbcSink.sink(
-            "insert into transfers (id, _from, _to, pool_id, amount, timestamp) values (?, ?, ?, ?, ?, ?)",
-            (statement, tf) -> {
-                statement.setString(1, tf.getId().toString());
-                statement.setString(2, tf.getFrom());
-                statement.setString(3, tf.getTo());
-                statement.setString(4, tf.getPoolId());
-                statement.setDouble(5, tf.getAmount());
-                statement.setLong(6, System.currentTimeMillis());
-            },
-            JdbcExecutionOptions.builder()
-                    .withBatchSize(1000)
-                    .withBatchIntervalMs(200)
-                    .withMaxRetries(5)
-                    .build(),
-            new JdbcConnectionOptions.JdbcConnectionOptionsBuilder()
-                    .withUrl("jdbc:postgresql://localhost:5432/postgres")
-                    .withDriverName("org.postgresql.Driver")
-                    .withUsername("baeldung")
-                    .withPassword("baeldung")
-                    .build()
-    ));
+//		 dbInSyncStream.addSink(
+//        JdbcSink.sink(
+//            "insert into transfers (id, _from, _to, pool_id, amount, timestamp) values (?, ?, ?, ?, ?, ?)",
+//            (statement, tf) -> {
+//                statement.setString(1, tf.getId().toString());
+//                statement.setString(2, tf.getFrom());
+//                statement.setString(3, tf.getTo());
+//                statement.setString(4, tf.getPoolId());
+//                statement.setDouble(5, tf.getAmount());
+//                statement.setLong(6, System.currentTimeMillis());
+//            },
+//            JdbcExecutionOptions.builder()
+//                    .withBatchSize(1000)
+//                    .withBatchIntervalMs(200)
+//                    .withMaxRetries(5)
+//                    .build(),
+//            new JdbcConnectionOptions.JdbcConnectionOptionsBuilder()
+//                    .withUrl("jdbc:postgresql://localhost:5432/postgres")
+//                    .withDriverName("org.postgresql.Driver")
+//                    .withUsername("baeldung")
+//                    .withPassword("baeldung")
+//                    .build()
+//    ));
 		
 		env.execute("TES transfer-request processing");
 	}

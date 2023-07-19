@@ -12,8 +12,8 @@ import lombok.NoArgsConstructor;
 public class Transfer {
 	
   private UUID id;
-  private String from;
-  private String to;
+  private String fromId;
+  private String toId;
   private String poolId;
   private String poolType;
   private double amount;

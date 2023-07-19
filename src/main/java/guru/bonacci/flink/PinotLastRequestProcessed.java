@@ -8,49 +8,52 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.function.Supplier;
 
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.async.ResultFuture;
 import org.apache.flink.streaming.api.functions.async.RichAsyncFunction;
 import org.apache.pinot.client.Connection;
 import org.apache.pinot.client.ConnectionFactory;
-import org.apache.pinot.client.ResultSet;
 import org.apache.pinot.client.ResultSetGroup;
 import org.jooq.SQLDialect;
+import org.jooq.conf.ParamType;
 import org.jooq.impl.DSL;
 
-import guru.bonacci.flink.domain.TransferStringWrapper;
-import guru.bonacci.flink.domain.TransferValidityWrapper;
-import lombok.extern.slf4j.Slf4j;
+import guru.bonacci.flink.domain.Transfer;
 
-@Slf4j
-class PinotLastRequestProcessed extends RichAsyncFunction<TransferStringWrapper, TransferValidityWrapper> {
+class PinotLastRequestProcessed extends RichAsyncFunction<Tuple2<Transfer, String>, Tuple2<Transfer, Boolean>> {
 
-		private transient Connection connection;
+		private static final long serialVersionUID = 1L;
+
+		private transient Connection pinotConnection;
 
     @Override
     public void open(Configuration parameters) throws Exception {
-    	connection = ConnectionFactory.fromHostList("localhost:8099");
+      pinotConnection = ConnectionFactory.fromHostList("localhost:8099");
     }
 
     @Override
     public void close() throws Exception {
-    	connection.close();
+    	pinotConnection.close();
     }
 
     @Override
-    public void asyncInvoke(TransferStringWrapper tfWrapper, final ResultFuture<TransferValidityWrapper> resultFuture) throws Exception {
-    	final String query = DSL.using(SQLDialect.POSTGRES)
-    		.select().from("transfers").where(field("ID").eq(tfWrapper.getStr())).toString();
+    public void asyncInvoke(Tuple2<Transfer, String> tfTuple, final ResultFuture<Tuple2<Transfer, Boolean>> resultFuture) throws Exception {
+    	if (tfTuple.f1 == null) {
+  	    resultFuture.complete(
+  	    		Collections.singleton(
+  	    				Tuple2.of(tfTuple.f0, true)));
+    		return;
+    	}
     	
-//    	PreparedStatement statement =
-//    	    connection.prepareStatement(new Request("sql", "select * from transfers where id = ?"));
-//    	statement.setString(1, tfWrapper.getStr());
+    	String query = DSL.using(SQLDialect.POSTGRES)
+      		.select()
+      		.from("transfers_4")
+      		.where(field("id").eq(tfTuple.f1))
+      		.getSQL(ParamType.INLINED);
 
-    	Future<ResultSetGroup> result = connection.executeAsync(query);
-    	connection.executeAsync(query);
-//    	Future<ResultSetGroup> result = statement.executeAsync();
-    	
-      CompletableFuture.supplyAsync(new Supplier<ResultSetGroup>() {
+    	Future<ResultSetGroup> result = pinotConnection.executeAsync(query);
+    	CompletableFuture.supplyAsync(new Supplier<ResultSetGroup>() {
 
           @Override
           public ResultSetGroup get() {
@@ -61,13 +64,9 @@ class PinotLastRequestProcessed extends RichAsyncFunction<TransferStringWrapper,
               }
           }
       }).thenAccept( (ResultSetGroup resultSetGroup) -> {
-      	ResultSet resultTableResultSet = resultSetGroup.getResultSet(0);
-      	int numRows = resultTableResultSet.getRowCount();
-      	log.info("rows " + numRows);
-      	boolean isProcessed = numRows > 0;
         resultFuture.complete(
         		Collections.singleton(
-        				TransferValidityWrapper.builder().transfer(tfWrapper.getTransfer()).valid(isProcessed).build()));
+        				Tuple2.of(tfTuple.f0, resultSetGroup.getResultSet(0).getRowCount() > 0)));
       });
     }
 }
