@@ -1,26 +1,9 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package guru.bonacci.flink;
 
 import java.util.concurrent.TimeUnit;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeHint;
@@ -39,6 +22,8 @@ import org.apache.flink.streaming.util.retryable.AsyncRetryStrategies;
 import org.apache.flink.streaming.util.retryable.RetryPredicates;
 import org.apache.flink.util.OutputTag;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import guru.bonacci.flink.connector.Sinks;
 import guru.bonacci.flink.connector.Sources;
 import guru.bonacci.flink.domain.Transfer;
@@ -49,15 +34,19 @@ import guru.bonacci.flink.source.TransferGenerator;
 
 public class TransferProcessingStreamJob {
 
+	final static String TOPIC_TRANSFERS = "transfers";
+	final static String TOPIC_ERRORS = "houston";
+	
 	public static void main(String[] args) throws Exception {
 
+		ObjectMapper mapper = new ObjectMapper();
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setParallelism(10);
 		
 		final OutputTag<Tuple2<Transfer, TransferErrors>> outputTagInvalidTransfer = 
 				new OutputTag<Tuple2<Transfer, TransferErrors>>("invalid"){};
 
-		env.fromSource(Sources.createInputMessageConsumer("foo", "my-group"), WatermarkStrategy.noWatermarks(), "Kafka Source")
+		env.fromSource(Sources.kafkaTransferConsumerTest(TOPIC_TRANSFERS, "flink-transfers-processor"), WatermarkStrategy.noWatermarks(), "Kafka Source")
 			.print();
 		
 		DataStream<TransferRule> ruleStream = env.addSource(new RuleGenerator())
@@ -80,7 +69,7 @@ public class TransferProcessingStreamJob {
 
 		throttledStream.getSideOutput(outputTagInvalidTransfer) // error handling
 		 .map(tuple -> tuple.f1.toString() + ">" + tuple.f0.toString())
-		 .sinkTo(Sinks.kafkaStringProducer("houston"));
+		 .sinkTo(Sinks.kafkaStringProducer(TOPIC_ERRORS));
 
 		@SuppressWarnings("unchecked")
 		AsyncRetryStrategy<Tuple2<Transfer, String>> asyncRetryStrategy =
@@ -105,7 +94,7 @@ public class TransferProcessingStreamJob {
 
 		 balancedStream.getSideOutput(outputTagInvalidTransfer) // error handling
 			 .map(tuple -> tuple.f1.toString() + ">" + tuple.f0.toString())
-			 .sinkTo(Sinks.kafkaStringProducer("houston"));
+			 .sinkTo(Sinks.kafkaStringProducer(TOPIC_ERRORS));
 
 		 DataStream<Tuple2<Transfer, String>> lastRequestStream = 
 				 balancedStream
@@ -119,9 +108,16 @@ public class TransferProcessingStreamJob {
 
 		 dbInSyncStream.getSideOutput(outputTagInvalidTransfer) // error handling
 			 .map(tuple -> tuple.f1.toString() + ">" + tuple.f0.toString())
-			 .sinkTo(Sinks.kafkaStringProducer("houston"));
+			 .sinkTo(Sinks.kafkaStringProducer(TOPIC_ERRORS));
 
-		 dbInSyncStream.map(Transfer::toString).sinkTo(Sinks.kafkaStringProducer("foo"));
+		 dbInSyncStream.map(new MapFunction<Transfer, Tuple2<Transfer, String>>() {
+
+			@Override
+			public Tuple2<Transfer, String> map(Transfer tr) throws Exception {
+				return Tuple2.<Transfer, String>of(tr, tr.getFrom());			}
+		 	})
+		 	.sinkTo(Sinks.kafkaTransferProducer(TOPIC_TRANSFERS));
+		 
 		 dbInSyncStream.addSink(
         JdbcSink.sink(
             "insert into transfers (id, _from, _to, pool_id, amount, timestamp) values (?, ?, ?, ?, ?, ?)",
